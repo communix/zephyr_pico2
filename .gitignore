@@ -51,5 +51,14 @@ Module.symvers
 Mkfile.old
 dkms.conf
 
+# build
+build/
+
 # debug information files
 *.dwo
+
+# python
+.venv
+__pycache__/
+
+.DS_Store
