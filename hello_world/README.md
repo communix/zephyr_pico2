@@ -44,3 +44,7 @@ None
 ### version 1.0.0
 
 Initial release.
+
+### version 1.0.1
+
+Seperate main.h - No functinal change
