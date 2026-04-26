@@ -44,3 +44,7 @@ None
 ### version 1.0.0
 
 Initial release.
+
+### version 1.1.0
+
+HW Ramdom number generation for LED blinking timing.

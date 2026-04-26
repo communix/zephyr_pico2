@@ -14,3 +14,5 @@
 #define LED0_NODE DT_ALIAS(led0)
 /** @brief The devicetree node identifier for the "timer0" label. */
 #define HW_TIMER DT_NODELABEL(timer0)
+/** @brief Flag to enable random sleep time. */
+#define RANDOM_SLEEP_TIME 1

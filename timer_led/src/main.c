@@ -9,7 +9,7 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/counter.h>
 #include <zephyr/logging/log.h>
-
+#include <zephyr/random/random.h>
 
 // For the version control
 #include <app_version.h>
@@ -59,11 +59,22 @@ static int hw_timer_setup(const struct device *dev, counter_alarm_callback_t cal
  */
 static void timer_callback(const struct device *dev, uint8_t chan_id, uint32_t ticks, void *user_data)
 {
+    uint32_t next_time_ms = SLEEP_TIME_MS; // Default next timer interval
     /* Toggle the LED state */
     gpio_pin_toggle_dt(&led);
-    LOG_INF("Timer callback triggered: toggled LED, ticks: %u", ticks);
 
-    hw_timer_setup(timer, timer_callback, SLEEP_TIME_MS);
+#if RANDOM_SLEEP_TIME == 1
+     uint8_t rand_value;
+    if (sys_csrand_get(&rand_value, sizeof(rand_value)) < 0) {
+        LOG_ERR("Failed to get random value for next timer interval, using default %d ms", SLEEP_TIME_MS);
+        next_time_ms = SLEEP_TIME_MS;
+    } else {
+        // Randomize the next timer interval between 100 ms and 1000 ms
+        next_time_ms = 100 + (rand_value % 901); // 100 to 1000 ms
+    }
+#endif // RANDOM_SLEEP_TIME
+    LOG_INF("Timer callback triggered: toggled LED, ticks: %u, next_time_ms: %u", ticks, next_time_ms);
+    hw_timer_setup(timer, timer_callback, next_time_ms);
 }
 /**
  * @brief main - Entry point for the Timer LED application
