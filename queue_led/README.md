@@ -6,9 +6,9 @@
 
 The Queue LED test application
 
- . Create two thread and communicate with FIFO
- . Thread 1 - LED controller, Generate random sleep time and send it to Thread 2 through queue.
- . Thread 2 - LED driver. LED on/off when message is received.
+- Create two thread and communicate through FIFO
+- Thread 1 - LED controller, Generate random sleep time and send it to Thread 2 through queue.
+- Thread 2 - LED driver. LED on/off when message is received.
 
 
 ## Requirements
@@ -22,7 +22,7 @@ This code is for RP pico2 board.
 > run in the zephyr workspace
 
 ``
-west build -p auto -b rpi_pico2/rp2350a/m33 -S cdc-acm-console zephyr_pico2/queue_led --build-dir zephyr_pico2/quene_led/build
+west build -p auto -b rpi_pico2/rp2350a/m33 -S cdc-acm-console zephyr_pico2/queue_led --build-dir zephyr_pico2/queue_led/build
 ``
 
 After flashing, the LED starts to blink and LED control message is printed on the console (USB Serial).

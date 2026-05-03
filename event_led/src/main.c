@@ -26,12 +26,10 @@ typedef struct event_data_s {
 } event_data_t;
 
 event_data_t led_event;
-struct k_thread thread_led_on_s;
-struct k_thread thread_led_off_s;
-struct k_mutex led_mutex;
-struct k_mutex csrand_mutex;
-K_THREAD_STACK_DEFINE(thread_led_on_stack, STACKSIZE);
-K_THREAD_STACK_DEFINE(thread_led_off_stack, STACKSIZE);
+struct k_thread led_controller_s;
+struct k_thread led_driver_s;
+K_THREAD_STACK_DEFINE(led_controller_stack, STACKSIZE);
+K_THREAD_STACK_DEFINE(led_driver_stack, STACKSIZE);
 
 /**
  * @brief Initialize the LED event data structure.
@@ -91,56 +89,40 @@ int set_led_event_message(event_data_t *p_led_event, uint32_t event_message) {
 uint32_t get_random_time_ms(uint32_t default_time_ms) {
     uint32_t rand_value;
     uint32_t rand_time_ms = default_time_ms; // Output random time in milliseconds
-    if (k_mutex_lock(&csrand_mutex, K_MSEC(MUTEX_TIMEOUT_MS)) == 0) {
-        if (sys_csrand_get(&rand_value, sizeof(rand_value)) < 0) {
-            LOG_ERR("Failed to get random value for next timer interval, using default %d ms", default_time_ms);
-        } else {
-            k_mutex_unlock(&csrand_mutex);
-            // Randomize the next timer interval between 100 ms and 1000 ms
-            rand_time_ms = 100 + (rand_value % 901); // 100 to 1000 ms
-        }
+    if (sys_csrand_get(&rand_value, sizeof(rand_value)) < 0) {
+        LOG_ERR("Failed to get random value for next timer interval, using default %d ms", default_time_ms);
     } else {
-        LOG_ERR("Cannot get CSRAND, using default %d ms", default_time_ms);
+        // Randomize the next timer interval between 100 ms and 1000 ms
+        rand_time_ms = 100 + (rand_value % 901); // 100 to 1000 ms
     }
     return rand_time_ms;
-}
-
-/**
- * @brief Common function to control the LED state (on/off) with mutex protection.
- * This function attempts to lock the mutex before setting the LED state.
- * @param led_on A boolean value indicating whether to turn the LED on (1) or off (0).
- * @return void
- */
-void common_led_control(int led_on) {
-    if (k_mutex_lock(&led_mutex, K_MSEC(MUTEX_TIMEOUT_MS)) == 0) {
-    /* mutex successfully locked */
-        gpio_pin_set_dt(&led, led_on);
-        k_mutex_unlock(&led_mutex);
-    } else {
-        LOG_ERR("Cannot get LED0");
-    }
 }
 
 /**
  * @brief Send an LED event.
  * @param p_event_data Pointer to the event data structure.
  * @param event_mask The event mask to send.
- * @param thread_name The name of the thread sending the event.
  * @return 0 on success, -1 on failure.
  */
-int send_led_event(event_data_t *p_event_data, uint32_t event_mask, const char *thread_name) {
+int send_led_event(event_data_t *p_event_data, uint32_t event_mask, uint32_t event_message) {
     int result = 0;
-    uint32_t event_message = 0; // Initialize event message
     if (event_mask != LED_EVENT_SYSTEM_ON) { // For LED_EVENT_SYSTEM_ON event, we do not need to set the event message, as it is only used to start the LED control threads. For other events, we need to set the event message to a random time for the next LED on/off interval.
-        event_message = get_random_time_ms(DEFAULT_LED_SLEEP_TIME_MS);
         result = set_led_event_message(p_event_data, event_message);
         if (result != 0) {
             LOG_ERR("Failed to set LED event message. Use previous event message for next LED interval.");
         }
     }
-    LOG_INF("%s thread - send 0x%x event, message=%d ms", thread_name, event_mask, event_message);
+    LOG_INF("Send 0x%x event, message=%d ms", event_mask, p_event_data->event_message);
     k_event_post(&p_event_data->event, event_mask);
     return result;
+}
+
+/** @brief Toggle the state of the LED.
+ * @param current_state The current state of the LED.
+ * @return The new state of the LED.
+ */
+static inline uint8_t toggle_led_state(uint8_t current_state) {
+    return current_state == LED_ON ? LED_OFF : LED_ON; // Toggle between ON and OFF
 }
 
 /**
@@ -150,38 +132,32 @@ int send_led_event(event_data_t *p_event_data, uint32_t event_mask, const char *
  * @param arg3 Unused parameter.
  * @return void
  */
-void led_on_main(void *arg1, void *arg2, void *arg3) {
+void led_controller_main(void *arg1, void *arg2, void *arg3) {
+    uint8_t led_state = LED_OFF; // Start with LED OFF state
     event_data_t *p_event_data = (event_data_t *)arg1;
 
     // Wait for the system on event to start the LED control thread
     k_event_wait(&p_event_data->event, LED_EVENT_SYSTEM_ON, false, K_FOREVER);
-    LOG_INF("LED_ON thread - LED_EVENT_SYSTEM_ON event received, LED is ON now");
-    common_led_control(1); // LED ON
+    LOG_INF("LED Controller thread - LED_EVENT_SYSTEM_ON event received");
     k_sleep(K_MSEC((SYSTEM_ON_SLEEP_TIME_MS))); // Sleep for other thread to check LED_EVENT_SYSTEM_ON event
 
-    LOG_INF("LED_ON thread - LED_EVENT_SYSTEM_ON event bit is cleared");
+    LOG_INF("LED Controller thread - LED_EVENT_SYSTEM_ON event bit is cleared");
     k_event_set_masked(&p_event_data->event, 0, LED_EVENT_SYSTEM_ON); // Clear the LED_EVENT_SYSTEM_ON event
-
-    int result = send_led_event(p_event_data, LED_EVENT_OFF, "LED_ON");
-    if (result != 0) {
-        LOG_ERR("Failed to send LED_EVENT_OFF event");
-        k_panic(); // Panic if we cannot send the LED_EVENT_OFF event, as the application cannot function properly without it
-    }
 
     // Main loop to wait for LED on events and control the LED accordingly
     while(true) {
-        k_event_wait(&p_event_data->event, LED_EVENT_ON, false, K_FOREVER);
-        uint32_t sleep_time_ms = get_led_event_message(p_event_data);
-        LOG_INF("LED_ON thread - LED_EVENT_ON event received, turn LED ON for %d ms", sleep_time_ms);
-        common_led_control(1); // LED ON
-        k_event_set_masked(&p_event_data->event, 0, LED_EVENT_ON); // Clear the LED_EVENT_SYSTEM_ON event
-        k_sleep(K_MSEC((sleep_time_ms))); // Sleep for other thread to check LED_EVENT_SYSTEM_ON event
 
-        int result = send_led_event(p_event_data, LED_EVENT_OFF, "LED_ON");
+        led_state = toggle_led_state(led_state); // Toggle the LED state
+        uint32_t sleep_time_ms = get_random_time_ms(DEFAULT_LED_SLEEP_TIME_MS);
+        uint32_t event = led_state == LED_ON ? LED_EVENT_ON : LED_EVENT_OFF;
+        // LOG_INF("LED Controller thread - LED state %s, send 0x%x event for %d ms", led_state == LED_ON ? "ON" : "OFF", event, sleep_time_ms);
+        int result = send_led_event(p_event_data, event, sleep_time_ms);
         if (result != 0) {
-            LOG_ERR("Failed to send LED_EVENT_OFF event");
+            LOG_ERR("Failed to send event - event: 0x%x", event);
             k_panic(); // Panic if we cannot send the LED_EVENT_OFF event, as the application cannot function properly without it
         }
+        k_sleep(K_MSEC(sleep_time_ms)); // Sleep for other thread to check LED_EVENT_SYSTEM_ON event
+
     }
 }
 
@@ -192,30 +168,25 @@ void led_on_main(void *arg1, void *arg2, void *arg3) {
  * @param arg3 Unused parameter.
  * @return void
  */
-void led_off_main(void *arg1, void *arg2, void *arg3) {
+void led_driver_main(void *arg1, void *arg2, void *arg3) {
     event_data_t *p_event_data = (event_data_t *)arg1;
 
     // Wait for the system on event to start the LED control thread
     k_event_wait(&p_event_data->event, LED_EVENT_SYSTEM_ON, false, K_FOREVER);
-    LOG_INF("LED_OFF thread - LED_EVENT_SYSTEM_ON event received");
+    LOG_INF("LED Driver thread - LED_EVENT_SYSTEM_ON event received");
     k_sleep(K_MSEC((SYSTEM_ON_SLEEP_TIME_MS))); // Sleep for other thread to check LED_EVENT_SYSTEM_ON event
-    LOG_INF("LED_OFF thread - LED_EVENT_SYSTEM_ON event bit is cleared");
+    LOG_INF("LED Driver thread - LED_EVENT_SYSTEM_ON event bit is cleared");
     k_event_set_masked(&p_event_data->event, 0, LED_EVENT_SYSTEM_ON); // Clear the LED_EVENT_SYSTEM_ON event
 
     // Main loop to wait for LED on events and control the LED accordingly
     while(true) {
-        k_event_wait(&p_event_data->event, LED_EVENT_OFF, false, K_FOREVER);
+        uint32_t event = k_event_wait(&p_event_data->event, LED_EVENT_OFF|LED_EVENT_ON, false, K_FOREVER);
         uint32_t sleep_time_ms = get_led_event_message(p_event_data);
-        LOG_INF("LED_OFF thread - LED_EVENT_OFF event received, turn LED OFF for %d ms", sleep_time_ms);
-        common_led_control(0); // LED OFF
-        k_event_set_masked(&p_event_data->event, 0, LED_EVENT_OFF); // Clear the LED_EVENT_SYSTEM_ON event
-        k_sleep(K_MSEC((sleep_time_ms))); // Sleep for other thread to check LED_EVENT_SYSTEM_ON event
+        uint8_t led_state = event & LED_EVENT_ON ? LED_ON : LED_OFF;
+        LOG_INF("LED Driver thread - 0x%X event received, turn LED %s for %d ms", event, led_state == LED_ON ? "ON" : "OFF", sleep_time_ms);
 
-        int result = send_led_event(p_event_data, LED_EVENT_ON, "LED_OFF");
-        if (result != 0) {
-            LOG_ERR("Failed to send LED_EVENT_ON event");
-            k_panic(); // Panic if we cannot send the LED_EVENT_ON event, as the application cannot function properly without it
-        }
+        gpio_pin_set_dt(&led, led_state); // Set LED state
+        k_event_set_masked(&p_event_data->event, 0, event); // Clear event
     }
 }
 
@@ -243,22 +214,18 @@ int main(void)
         return -1;
     }
 
-    k_mutex_init(&led_mutex);
-    k_mutex_init(&csrand_mutex);
-
     init_led_event(&led_event);
-    k_tid_t led_on_tid = k_thread_create(&thread_led_on_s, thread_led_on_stack,
-                                         K_THREAD_STACK_SIZEOF(thread_led_on_stack),
-                                         led_on_main, (void *)&led_event, NULL, NULL, ON_PRIORITY, 0, K_NO_WAIT);
-    k_tid_t led_off_tid = k_thread_create(&thread_led_off_s, thread_led_off_stack,
-                                         K_THREAD_STACK_SIZEOF(thread_led_off_stack),
-                                         led_off_main, (void *)&led_event, NULL, NULL, OFF_PRIORITY, 0, K_NO_WAIT);
+    k_tid_t led_controller_tid = k_thread_create(&led_controller_s, led_controller_stack,
+                                         K_THREAD_STACK_SIZEOF(led_controller_stack),
+                                         led_controller_main, (void *)&led_event, NULL, NULL, PRIORITY, 0, K_NO_WAIT);
+    k_tid_t led_driver_tid = k_thread_create(&led_driver_s, led_driver_stack,
+                                         K_THREAD_STACK_SIZEOF(led_driver_stack),
+                                         led_driver_main, (void *)&led_event, NULL, NULL, PRIORITY, 0, K_NO_WAIT);
 
-    send_led_event(&led_event, LED_EVENT_SYSTEM_ON, "main");
+    send_led_event(&led_event, LED_EVENT_SYSTEM_ON, 0);
  
-    (void)led_on_tid; // To avoid warining
-    (void)led_off_tid; // To avoid warining
-    // Send initial LED on event
+    (void)led_controller_tid; // To avoid warining
+    (void)led_driver_tid; // To avoid warining
     
     return 0;
 }

@@ -6,6 +6,10 @@
 
 The Event LED test application
 
+- Create two thread and communicate through Event message
+- Thread 1 - LED controller, Generate random sleep time and send it to Thread 2 through queue.
+- Thread 2 - LED driver. LED on/off when message is received.
+
 ## Requirements
 ************
 
@@ -44,3 +48,8 @@ None
 ### version 1.0.0
 
 Initial release.
+
+### version 1.1.0
+
+New architecture.
+LED controller send on/off event to LED driver.
