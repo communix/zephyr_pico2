@@ -6,6 +6,49 @@
 
 Blinking LED using HW timer
 
+```
++-----------------------------+
+|          main()             |
+|  (Entry Point Block)        |
++-----------------------------+
+| - Log version & devices     |
+| - Check LED ready           |
+| - Configure LED pin         |
+| - Call hw_timer_setup()     |
+| - Return 0                  |
++-----------------------------+
+              |
+              | calls
+              v
++-----------------------------+
+|     hw_timer_setup()        |
+|  (Timer Setup Block)        |
++-----------------------------+
+| - Check timer device ready  |
+| - Configure alarm with      |
+|   callback & interval       |
+| - Set channel alarm         |
+| - Return success/failure    |
++-----------------------------+
+              |
+              | triggers (after alarm)
+              v
++-----------------------------+
+|     timer_callback()        |
+|  (Callback Block)           |
++-----------------------------+
+| - Toggle LED state          |
+| - If RANDOM_SLEEP_TIME:     |
+|   - Get random value        |
+|   - Calculate next interval |
+| - Else: use SLEEP_TIME_MS   |
+| - Call hw_timer_setup()     |
+|   for next alarm            |
+| - Log info                  |
++-----------------------------+
+              ^
+              | loops back (reschedules timer)
+```
 ## Requirements
 ************
 
