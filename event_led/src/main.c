@@ -139,14 +139,9 @@ void led_controller_main(void *arg1, void *arg2, void *arg3) {
     // Wait for the system on event to start the LED control thread
     k_event_wait(&p_event_data->event, LED_EVENT_SYSTEM_ON, false, K_FOREVER);
     LOG_INF("LED Controller thread - LED_EVENT_SYSTEM_ON event received");
-    k_sleep(K_MSEC((SYSTEM_ON_SLEEP_TIME_MS))); // Sleep for other thread to check LED_EVENT_SYSTEM_ON event
-
-    LOG_INF("LED Controller thread - LED_EVENT_SYSTEM_ON event bit is cleared");
-    k_event_set_masked(&p_event_data->event, 0, LED_EVENT_SYSTEM_ON); // Clear the LED_EVENT_SYSTEM_ON event
 
     // Main loop to wait for LED on events and control the LED accordingly
     while(true) {
-
         led_state = toggle_led_state(led_state); // Toggle the LED state
         uint32_t sleep_time_ms = get_random_time_ms(DEFAULT_LED_SLEEP_TIME_MS);
         uint32_t event = led_state == LED_ON ? LED_EVENT_ON : LED_EVENT_OFF;
@@ -174,9 +169,6 @@ void led_driver_main(void *arg1, void *arg2, void *arg3) {
     // Wait for the system on event to start the LED control thread
     k_event_wait(&p_event_data->event, LED_EVENT_SYSTEM_ON, false, K_FOREVER);
     LOG_INF("LED Driver thread - LED_EVENT_SYSTEM_ON event received");
-    k_sleep(K_MSEC((SYSTEM_ON_SLEEP_TIME_MS))); // Sleep for other thread to check LED_EVENT_SYSTEM_ON event
-    LOG_INF("LED Driver thread - LED_EVENT_SYSTEM_ON event bit is cleared");
-    k_event_set_masked(&p_event_data->event, 0, LED_EVENT_SYSTEM_ON); // Clear the LED_EVENT_SYSTEM_ON event
 
     // Main loop to wait for LED on events and control the LED accordingly
     while(true) {
@@ -200,6 +192,7 @@ void led_driver_main(void *arg1, void *arg2, void *arg3) {
 int main(void)
 {
     int ret;
+    k_sleep(K_SECONDS(3)); // Sleep for system ON, for stable Log message output.
 
     LOG_DBG("LED Event - version %s", APP_VERSION_STRING);
     LOG_INF("LED device: %s, pin: %d", led.port->name, led.pin);
@@ -221,7 +214,7 @@ int main(void)
     k_tid_t led_driver_tid = k_thread_create(&led_driver_s, led_driver_stack,
                                          K_THREAD_STACK_SIZEOF(led_driver_stack),
                                          led_driver_main, (void *)&led_event, NULL, NULL, PRIORITY, 0, K_NO_WAIT);
-
+ 
     send_led_event(&led_event, LED_EVENT_SYSTEM_ON, 0);
  
     (void)led_controller_tid; // To avoid warining
